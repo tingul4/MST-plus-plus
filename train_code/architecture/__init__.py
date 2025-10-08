@@ -11,11 +11,11 @@ from .MST_Plus_Plus import MST_Plus_Plus
 from .Restormer import Restormer
 from .AWAN import AWAN
 
-def model_generator(method, pretrained_model_path=None):
+def model_generator(method, pretrained_model_path=None, upscale_factor=1):
     if method == 'mirnet':
         model = MIRNet(n_RRG=3, n_MSRB=1, height=3, width=1).cuda()
     elif method == 'mst_plus_plus':
-        model = MST_Plus_Plus().cuda()
+        model = MST_Plus_Plus(in_channels=3, out_channels=61, n_feat=31, stage=3, upscale_factor=upscale_factor).cuda()
     elif method == 'mst':
         model = MST(dim=31, stage=2, num_blocks=[4, 7, 5]).cuda()
     elif method == 'hinet':

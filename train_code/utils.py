@@ -8,9 +8,6 @@ import os
 
 class AverageMeter(object):
     def __init__(self):
-        self.reset()
-
-    def reset(self):
         self.val = 0
         self.avg = 0
         self.sum = 0
@@ -29,10 +26,11 @@ def initialize_logger(file_dir):
     formatter = logging.Formatter('%(asctime)s - %(message)s', "%Y-%m-%d %H:%M:%S")
     fhandler.setFormatter(formatter)
     logger.addHandler(fhandler)
+    logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.INFO)
     return logger
 
-def save_checkpoint(model_path, epoch, iteration, model, optimizer):
+def save_checkpoint(model_path, epoch, iteration, model, optimizer, PSNR):
     state = {
         'epoch': epoch,
         'iter': iteration,
@@ -40,7 +38,7 @@ def save_checkpoint(model_path, epoch, iteration, model, optimizer):
         'optimizer': optimizer.state_dict(),
     }
 
-    torch.save(state, os.path.join(model_path, 'net_%depoch.pth' % epoch))
+    torch.save(state, os.path.join(model_path, f"MSTPP_{epoch}_{PSNR:2f}.pth"))
 
 class Loss_MRAE(nn.Module):
     def __init__(self):
@@ -49,25 +47,40 @@ class Loss_MRAE(nn.Module):
     def forward(self, outputs, label):
         assert outputs.shape == label.shape
         error = torch.abs(outputs - label) / label
-        mrae = torch.mean(error.view(-1))
+        mrae = torch.mean(error.reshape(-1))
         return mrae
 
 
 class Loss_MRAE_custom(nn.Module):
-    def __init__(self):
-        super(Loss_MRAE_custom, self).__init__()
+    # def __init__(self):
+    #     super(Loss_MRAE_custom, self).__init__()
+
+    # def forward(self, outputs, label):
+    #     assert outputs.shape == label.shape
+    #     mask = label == 0
+    #     if mask.any():
+    #         label_wo_zero = label.clone()
+    #         label_wo_zero[mask] = 1e-8
+    #     else:
+    #         label_wo_zero = label
+    #     error = torch.abs(outputs - label) / label_wo_zero
+    #     mrae = torch.mean(error)
+    #     return mrae
+    def __init__(self, eps=1e-4, ignore_zeros=False):
+        super().__init__()
+        self.eps = eps
+        self.ignore_zeros = ignore_zeros
 
     def forward(self, outputs, label):
-        assert outputs.shape == label.shape
-        mask = label == 0
-        if mask.any():
-            label_wo_zero = label.clone()
-            label_wo_zero[mask] = 1e-8
+        # 分母稳化：|label| 并设下限 eps，避免0与近0爆炸
+        denom = label.abs().clamp_min(self.eps)
+        rel = (outputs - label).abs() / denom
+        if self.ignore_zeros:
+            # 若与评测一致需确认是否允许忽略近零/零标签
+            mask = label.abs() > self.eps
+            return rel[mask].mean()
         else:
-            label_wo_zero = label
-        error = torch.abs(outputs - label) / label_wo_zero
-        mrae = torch.mean(error)
-        return mrae
+            return rel.mean()
 
 
 class Loss_RMSE(nn.Module):
@@ -78,7 +91,7 @@ class Loss_RMSE(nn.Module):
         assert outputs.shape == label.shape
         error = outputs-label
         sqrt_error = torch.pow(error,2)
-        rmse = torch.sqrt(torch.mean(sqrt_error.view(-1)))
+        rmse = torch.sqrt(torch.mean(sqrt_error.reshape(-1)))
         return rmse
 
 class Loss_PSNR(nn.Module):

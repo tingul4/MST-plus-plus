@@ -268,29 +268,45 @@ class MST(nn.Module):
         return out
 
 class MST_Plus_Plus(nn.Module):
-    def __init__(self, in_channels=3, out_channels=31, n_feat=31, stage=3):
+    def __init__(self, in_channels=3, out_channels=31, n_feat=31, stage=3, upscale_factor=1):
         super(MST_Plus_Plus, self).__init__()
         self.stage = stage
+        self.upscale_factor = upscale_factor
         self.conv_in = nn.Conv2d(in_channels, n_feat, kernel_size=3, padding=(3 - 1) // 2,bias=False)
         modules_body = [MST(dim=31, stage=2, num_blocks=[1,1,1]) for _ in range(stage)]
         self.body = nn.Sequential(*modules_body)
         self.conv_out = nn.Conv2d(n_feat, out_channels, kernel_size=3, padding=(3 - 1) // 2,bias=False)
 
+        # Add upsampling layers if upscale_factor > 1
+        if upscale_factor > 1:
+            self.upsample = nn.Sequential(
+                nn.Conv2d(out_channels, out_channels * (upscale_factor ** 2), kernel_size=3, padding=1, bias=False),
+                nn.PixelShuffle(upscale_factor),
+                nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+            )
+        else:
+            self.upsample = None
+
     def forward(self, x):
         """
         x: [b,c,h,w]
-        return out:[b,c,h,w]
+        return out:[b,c,h*upscale,w*upscale]
         """
         b, c, h_inp, w_inp = x.shape
         hb, wb = 8, 8
         pad_h = (hb - h_inp % hb) % hb
         pad_w = (wb - w_inp % wb) % wb
         x = F.pad(x, [0, pad_w, 0, pad_h], mode='reflect')
-        x = self.conv_in(x)
-        h = self.body(x)
+        x_feat = self.conv_in(x)
+        h = self.body(x_feat)
         h = self.conv_out(h)
-        h += x
-        return h[:, :, :h_inp, :w_inp]
+        h = h[:, :, :h_inp, :w_inp]
+
+        # Apply upsampling if enabled
+        if self.upsample is not None:
+            h = self.upsample(h)
+
+        return h
 
 
 
