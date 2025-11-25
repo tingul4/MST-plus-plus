@@ -25,7 +25,7 @@ def _resize_cube_to_match(cube: np.ndarray, height: int, width: int) -> np.ndarr
     return resized
 
 class TrainDataset(Dataset):
-    def __init__(self, data_root, crop_size, arg=True, bgr2rgb=True, stride=8, upscale_factor=1):
+    def __init__(self, data_root, crop_size, arg=True, bgr2rgb=True, stride=8, upscale_factor=1, isTest=False):
         self.crop_size = crop_size
         self.arg = arg
         self.stride = stride
@@ -46,6 +46,8 @@ class TrainDataset(Dataset):
         hyper_dir = root / "train" / "hsi_61"
         bgr_dir = root / "train" / "rgb_2"
         for idx, scene_id in enumerate(sample_ids):
+            if isTest and idx > 3:
+                break
             hyper_path = hyper_dir / f"{scene_id}.h5"
             bgr_path = bgr_dir / f"{scene_id}.png"
 
@@ -65,11 +67,7 @@ class TrainDataset(Dataset):
             if bgr2rgb:
                 bgr = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             bgr = np.float32(bgr)
-            bgr_min, bgr_max = bgr.min(), bgr.max()
-            if bgr_max > bgr_min:
-                bgr = (bgr - bgr_min) / (bgr_max - bgr_min)
-            else:
-                bgr.fill(0.0)
+            bgr = bgr / 255.0
             bgr = np.transpose(bgr, (2, 0, 1))
 
             # Only resize if not doing super-resolution (upscale_factor=1)
@@ -135,7 +133,7 @@ class TrainDataset(Dataset):
         return self.patch_per_img*self.img_num
 
 class ValidDataset(Dataset):
-    def __init__(self, data_root, bgr2rgb=True, upscale_factor=1):
+    def __init__(self, data_root, bgr2rgb=True, upscale_factor=1, isTest=False):
         self.hypers = []
         self.bgrs = []
         self.upscale_factor = upscale_factor
@@ -153,6 +151,8 @@ class ValidDataset(Dataset):
         bgr_dir = root / "test-public" / "rgb_2"
 
         for idx, scene_id in enumerate(sample_ids):
+            if isTest and idx > 3:
+                break
             hyper_path = hyper_dir / f"{scene_id}.h5"
             bgr_path = bgr_dir / f"{scene_id}.png"
 
@@ -172,11 +172,7 @@ class ValidDataset(Dataset):
             if bgr2rgb:
                 bgr = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             bgr = np.float32(bgr)
-            bgr_min, bgr_max = bgr.min(), bgr.max()
-            if bgr_max > bgr_min:
-                bgr = (bgr - bgr_min) / (bgr_max - bgr_min)
-            else:
-                bgr.fill(0.0)
+            bgr = bgr / 255.0
             bgr = np.transpose(bgr, (2, 0, 1))
 
             # Only resize if not doing super-resolution (upscale_factor=1)

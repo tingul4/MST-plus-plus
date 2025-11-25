@@ -125,3 +125,22 @@ def record_loss(loss_csv, epoch, iteration, epoch_time, lr, train_loss, test_los
     loss_csv.write('{},{},{},{},{},{}\n'.format(epoch, iteration, epoch_time, lr, train_loss, test_loss))
     loss_csv.flush()
     loss_csv.close
+
+class Loss_SAM(nn.Module):
+    def __init__(self):
+        super(Loss_SAM, self).__init__()
+        self.eps = 1e-6
+
+    def forward(self, pred, target):
+        pred_norm = torch.sqrt(torch.sum(pred.pow(2), dim=1, keepdim=True))
+        target_norm = torch.sqrt(torch.sum(target.pow(2), dim=1, keepdim=True))
+        
+        pred_normalized = pred / (pred_norm + self.eps)
+        target_normalized = target / (target_norm + self.eps)
+        
+        cos_similarity = torch.sum(pred_normalized * target_normalized, dim=1)
+        # Clamp to avoid nan from arccos
+        cos_similarity = torch.clamp(cos_similarity, -1.0, 1.0)
+        
+        sam_angle = torch.acos(cos_similarity)
+        return torch.mean(sam_angle)

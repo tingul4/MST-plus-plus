@@ -292,20 +292,15 @@ class MST_Plus_Plus(nn.Module):
         x: [b,c,h,w]
         return out:[b,c,h*upscale,w*upscale]
         """
-        b, c, h_inp, w_inp = x.shape
-        hb, wb = 8, 8
-        pad_h = (hb - h_inp % hb) % hb
-        pad_w = (wb - w_inp % wb) % wb
-        x = F.pad(x, [0, pad_w, 0, pad_h], mode='reflect')
         x_feat = self.conv_in(x)
         h = self.body(x_feat)
         h = self.conv_out(h)
-        h = h[:, :, :h_inp, :w_inp]
 
         # Apply upsampling if enabled
         if self.upsample is not None:
             h = self.upsample(h)
 
+        h = torch.tanh(h)
         return h
 
 
