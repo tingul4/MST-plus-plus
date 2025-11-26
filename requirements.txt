@@ -1,5 +1,5 @@
 --index-url https://pypi.org/simple
---extra-index-url https://download.pytorch.org/whl/nightly/cu128
+--extra-index-url https://download.pytorch.org/whl/cu128
 einops
 h5py
 hdf5storage
@@ -8,9 +8,9 @@ opencv-python
 pandas
 pillow
 scipy
-torch
-torchaudio
-torchvision
+torch==2.7.0+cu128
+torchaudio==2.7.0+cu128
+torchvision==0.22.0+cu128
 tqdm
 # Development tools
 ipykernel==6.16.2
