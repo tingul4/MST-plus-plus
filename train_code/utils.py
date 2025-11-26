@@ -6,6 +6,7 @@ import logging
 import numpy as np
 import os
 
+
 class AverageMeter(object):
     def __init__(self):
         self.val = 0
@@ -22,23 +23,47 @@ class AverageMeter(object):
 
 def initialize_logger(file_dir):
     logger = logging.getLogger()
-    fhandler = logging.FileHandler(filename=file_dir, mode='a')
-    formatter = logging.Formatter('%(asctime)s - %(message)s', "%Y-%m-%d %H:%M:%S")
+    fhandler = logging.FileHandler(filename=file_dir, mode="a")
+    formatter = logging.Formatter("%(asctime)s - %(message)s", "%Y-%m-%d %H:%M:%S")
     fhandler.setFormatter(formatter)
     logger.addHandler(fhandler)
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.INFO)
     return logger
 
-def save_checkpoint(model_path, epoch, iteration, model, optimizer, PSNR):
+
+def save_checkpoint(
+    model_path,
+    epoch,
+    iteration,
+    model,
+    optimizer,
+    PSNR,
+    scheduler=None,
+    ema=None,
+    scheduler_config=None,
+):
     state = {
-        'epoch': epoch,
-        'iter': iteration,
-        'state_dict': model.state_dict(),
-        'optimizer': optimizer.state_dict(),
+        "epoch": epoch,
+        "iter": iteration,
+        "state_dict": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
     }
 
+    # Save scheduler state for proper learning rate resume
+    if scheduler is not None:
+        state["scheduler"] = scheduler.state_dict()
+
+    # Save scheduler config for validation on resume
+    if scheduler_config is not None:
+        state["scheduler_config"] = scheduler_config
+
+    # Save EMA shadow weights for stable resume
+    if ema is not None:
+        state["ema_shadow"] = ema.shadow
+
     torch.save(state, os.path.join(model_path, f"MSTPP_{epoch}_{PSNR:2f}.pth"))
+
 
 class Loss_MRAE(nn.Module):
     def __init__(self):
@@ -89,10 +114,11 @@ class Loss_RMSE(nn.Module):
 
     def forward(self, outputs, label):
         assert outputs.shape == label.shape
-        error = outputs-label
-        sqrt_error = torch.pow(error,2)
+        error = outputs - label
+        sqrt_error = torch.pow(error, 2)
         rmse = torch.sqrt(torch.mean(sqrt_error.reshape(-1)))
         return rmse
+
 
 class Loss_PSNR(nn.Module):
     def __init__(self):
@@ -103,12 +129,13 @@ class Loss_PSNR(nn.Module):
         C = im_true.size()[1]
         H = im_true.size()[2]
         W = im_true.size()[3]
-        Itrue = im_true.clamp(0., 1.).mul_(data_range).resize_(N, C * H * W)
-        Ifake = im_fake.clamp(0., 1.).mul_(data_range).resize_(N, C * H * W)
+        Itrue = im_true.clamp(0.0, 1.0).mul_(data_range).resize_(N, C * H * W)
+        Ifake = im_fake.clamp(0.0, 1.0).mul_(data_range).resize_(N, C * H * W)
         mse = nn.MSELoss(reduce=False)
         err = mse(Itrue, Ifake).sum(dim=1, keepdim=True).div_(C * H * W)
-        psnr = 10. * torch.log((data_range ** 2) / err) / np.log(10.)
+        psnr = 10.0 * torch.log((data_range**2) / err) / np.log(10.0)
         return torch.mean(psnr)
+
 
 def time2file_name(time):
     year = time[0:4]
@@ -117,14 +144,22 @@ def time2file_name(time):
     hour = time[11:13]
     minute = time[14:16]
     second = time[17:19]
-    time_filename = year + '_' + month + '_' + day + '_' + hour + '_' + minute + '_' + second
+    time_filename = (
+        year + "_" + month + "_" + day + "_" + hour + "_" + minute + "_" + second
+    )
     return time_filename
 
+
 def record_loss(loss_csv, epoch, iteration, epoch_time, lr, train_loss, test_loss):
-    """ Record many results."""
-    loss_csv.write('{},{},{},{},{},{}\n'.format(epoch, iteration, epoch_time, lr, train_loss, test_loss))
+    """Record many results."""
+    loss_csv.write(
+        "{},{},{},{},{},{}\n".format(
+            epoch, iteration, epoch_time, lr, train_loss, test_loss
+        )
+    )
     loss_csv.flush()
     loss_csv.close
+
 
 class Loss_SAM(nn.Module):
     def __init__(self):
@@ -134,13 +169,13 @@ class Loss_SAM(nn.Module):
     def forward(self, pred, target):
         pred_norm = torch.sqrt(torch.sum(pred.pow(2), dim=1, keepdim=True))
         target_norm = torch.sqrt(torch.sum(target.pow(2), dim=1, keepdim=True))
-        
+
         pred_normalized = pred / (pred_norm + self.eps)
         target_normalized = target / (target_norm + self.eps)
-        
+
         cos_similarity = torch.sum(pred_normalized * target_normalized, dim=1)
         # Clamp to avoid nan from arccos
         cos_similarity = torch.clamp(cos_similarity, -1.0, 1.0)
-        
+
         sam_angle = torch.acos(cos_similarity)
         return torch.mean(sam_angle)

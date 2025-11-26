@@ -11,5 +11,9 @@ python3 train_code/train.py \
     --stride 16 \
     --gpu_id 0,1 \
     --upscale_factor 2 \
-    --outf ./exp/mst_plus_plus/
-    # --pretrained_model_path /home/danielchen/MST-plus-plus/exp/mst_plus_plus_sr2x/2025_10_08_16_56_56/MSTPP_3_35.249081.pth
+    --outf ./exp/mst_plus_plus/ \
+    --use_ema \
+    --ema_decay 0.999 \
+    --lr_restart_epochs 10 \
+    --lr_restart_mult 2 \
+    --resume /home/danielchen/MST-plus-plus/exp/mst_plus_plus/2025_11_24_17_44_18/MSTPP_26_40.602375.pth
