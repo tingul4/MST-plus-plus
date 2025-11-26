@@ -147,8 +147,8 @@ class ValidDataset(Dataset):
         if not sample_ids:
             raise ValueError(f"No entries found in {split_file}")
 
-        hyper_dir = root / "test-public" / "hsi_61"
-        bgr_dir = root / "test-public" / "rgb_2"
+        hyper_dir = root / "public-test" / "hsi_61"
+        bgr_dir = root / "public-test" / "rgb_2"
 
         for idx, scene_id in enumerate(sample_ids):
             if isTest and idx > 3:

@@ -6,41 +6,44 @@ import math
 import warnings
 from torch.nn.init import _calculate_fan_in_and_fan_out
 
+
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     def norm_cdf(x):
-        return (1. + math.erf(x / math.sqrt(2.))) / 2.
+        return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
 
     if (mean < a - 2 * std) or (mean > b + 2 * std):
-        warnings.warn("mean is more than 2 std from [a, b] in nn.init.trunc_normal_. "
-                      "The distribution of values may be incorrect.",
-                      stacklevel=2)
+        warnings.warn(
+            "mean is more than 2 std from [a, b] in nn.init.trunc_normal_. "
+            "The distribution of values may be incorrect.",
+            stacklevel=2,
+        )
     with torch.no_grad():
         l = norm_cdf((a - mean) / std)
         u = norm_cdf((b - mean) / std)
         tensor.uniform_(2 * l - 1, 2 * u - 1)
         tensor.erfinv_()
-        tensor.mul_(std * math.sqrt(2.))
+        tensor.mul_(std * math.sqrt(2.0))
         tensor.add_(mean)
         tensor.clamp_(min=a, max=b)
         return tensor
 
 
-def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
+def trunc_normal_(tensor, mean=0.0, std=1.0, a=-2.0, b=2.0):
     # type: (Tensor, float, float, float, float) -> Tensor
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
 
-def variance_scaling_(tensor, scale=1.0, mode='fan_in', distribution='normal'):
+def variance_scaling_(tensor, scale=1.0, mode="fan_in", distribution="normal"):
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-    if mode == 'fan_in':
+    if mode == "fan_in":
         denom = fan_in
-    elif mode == 'fan_out':
+    elif mode == "fan_out":
         denom = fan_out
-    elif mode == 'fan_avg':
+    elif mode == "fan_avg":
         denom = (fan_in + fan_out) / 2
     variance = scale / denom
     if distribution == "truncated_normal":
-        trunc_normal_(tensor, std=math.sqrt(variance) / .87962566103423978)
+        trunc_normal_(tensor, std=math.sqrt(variance) / 0.87962566103423978)
     elif distribution == "normal":
         tensor.normal_(std=math.sqrt(variance))
     elif distribution == "uniform":
@@ -51,7 +54,7 @@ def variance_scaling_(tensor, scale=1.0, mode='fan_in', distribution='normal'):
 
 
 def lecun_normal_(tensor):
-    variance_scaling_(tensor, mode='fan_in', distribution='truncated_normal')
+    variance_scaling_(tensor, mode="fan_in", distribution="truncated_normal")
 
 
 class PreNorm(nn.Module):
@@ -69,28 +72,36 @@ class GELU(nn.Module):
     def forward(self, x):
         return F.gelu(x)
 
-def conv(in_channels, out_channels, kernel_size, bias=False, padding = 1, stride = 1):
+
+def conv(in_channels, out_channels, kernel_size, bias=False, padding=1, stride=1):
     return nn.Conv2d(
-        in_channels, out_channels, kernel_size,
-        padding=(kernel_size//2), bias=bias, stride=stride)
+        in_channels,
+        out_channels,
+        kernel_size,
+        padding=(kernel_size // 2),
+        bias=bias,
+        stride=stride,
+    )
 
 
-def shift_back(inputs,step=2):          # input [bs,28,256,310]  output [bs, 28, 256, 256]
+def shift_back(inputs, step=2):  # input [bs,28,256,310]  output [bs, 28, 256, 256]
     [bs, nC, row, col] = inputs.shape
-    down_sample = 256//row
-    step = float(step)/float(down_sample*down_sample)
+    down_sample = 256 // row
+    step = float(step) / float(down_sample * down_sample)
     out_col = row
     for i in range(nC):
-        inputs[:,i,:,:out_col] = \
-            inputs[:,i,:,int(step*i):int(step*i)+out_col]
+        inputs[:, i, :, :out_col] = inputs[
+            :, i, :, int(step * i) : int(step * i) + out_col
+        ]
     return inputs[:, :, :, :out_col]
+
 
 class MS_MSA(nn.Module):
     def __init__(
-            self,
-            dim,
-            dim_head,
-            heads,
+        self,
+        dim,
+        dim_head,
+        heads,
     ):
         super().__init__()
         self.num_heads = heads
@@ -113,12 +124,14 @@ class MS_MSA(nn.Module):
         return out: [b,h,w,c]
         """
         b, h, w, c = x_in.shape
-        x = x_in.reshape(b,h*w,c)
+        x = x_in.reshape(b, h * w, c)
         q_inp = self.to_q(x)
         k_inp = self.to_k(x)
         v_inp = self.to_v(x)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.num_heads),
-                                (q_inp, k_inp, v_inp))
+        q, k, v = map(
+            lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.num_heads),
+            (q_inp, k_inp, v_inp),
+        )
         v = v
         # q: b,heads,hw,c
         q = q.transpose(-2, -1)
@@ -126,17 +139,20 @@ class MS_MSA(nn.Module):
         v = v.transpose(-2, -1)
         q = F.normalize(q, dim=-1, p=2)
         k = F.normalize(k, dim=-1, p=2)
-        attn = (k @ q.transpose(-2, -1))   # A = K^T*Q
+        attn = k @ q.transpose(-2, -1)  # A = K^T*Q
         attn = attn * self.rescale
         attn = attn.softmax(dim=-1)
-        x = attn @ v   # b,heads,d,hw
-        x = x.permute(0, 3, 1, 2)    # Transpose
+        x = attn @ v  # b,heads,d,hw
+        x = x.permute(0, 3, 1, 2)  # Transpose
         x = x.reshape(b, h * w, self.num_heads * self.dim_head)
         out_c = self.proj(x).view(b, h, w, c)
-        out_p = self.pos_emb(v_inp.reshape(b,h,w,c).permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        out_p = self.pos_emb(v_inp.reshape(b, h, w, c).permute(0, 3, 1, 2)).permute(
+            0, 2, 3, 1
+        )
         out = out_c + out_p
 
         return out
+
 
 class FeedForward(nn.Module):
     def __init__(self, dim, mult=4):
@@ -157,21 +173,26 @@ class FeedForward(nn.Module):
         out = self.net(x.permute(0, 3, 1, 2))
         return out.permute(0, 2, 3, 1)
 
+
 class MSAB(nn.Module):
     def __init__(
-            self,
-            dim,
-            dim_head,
-            heads,
-            num_blocks,
+        self,
+        dim,
+        dim_head,
+        heads,
+        num_blocks,
     ):
         super().__init__()
         self.blocks = nn.ModuleList([])
         for _ in range(num_blocks):
-            self.blocks.append(nn.ModuleList([
-                MS_MSA(dim=dim, dim_head=dim_head, heads=heads),
-                PreNorm(dim, FeedForward(dim=dim))
-            ]))
+            self.blocks.append(
+                nn.ModuleList(
+                    [
+                        MS_MSA(dim=dim, dim_head=dim_head, heads=heads),
+                        PreNorm(dim, FeedForward(dim=dim)),
+                    ]
+                )
+            )
 
     def forward(self, x):
         """
@@ -179,14 +200,15 @@ class MSAB(nn.Module):
         return out: [b,c,h,w]
         """
         x = x.permute(0, 2, 3, 1)
-        for (attn, ff) in self.blocks:
+        for attn, ff in self.blocks:
             x = attn(x) + x
             x = ff(x) + x
         out = x.permute(0, 3, 1, 2)
         return out
 
+
 class MST(nn.Module):
-    def __init__(self, in_dim=31, out_dim=31, dim=31, stage=2, num_blocks=[2,4,4]):
+    def __init__(self, in_dim=31, out_dim=31, dim=31, stage=2, num_blocks=[2, 4, 4]):
         super(MST, self).__init__()
         self.dim = dim
         self.stage = stage
@@ -198,27 +220,53 @@ class MST(nn.Module):
         self.encoder_layers = nn.ModuleList([])
         dim_stage = dim
         for i in range(stage):
-            self.encoder_layers.append(nn.ModuleList([
-                MSAB(
-                    dim=dim_stage, num_blocks=num_blocks[i], dim_head=dim, heads=dim_stage // dim),
-                nn.Conv2d(dim_stage, dim_stage * 2, 4, 2, 1, bias=False),
-            ]))
+            self.encoder_layers.append(
+                nn.ModuleList(
+                    [
+                        MSAB(
+                            dim=dim_stage,
+                            num_blocks=num_blocks[i],
+                            dim_head=dim,
+                            heads=dim_stage // dim,
+                        ),
+                        nn.Conv2d(dim_stage, dim_stage * 2, 4, 2, 1, bias=False),
+                    ]
+                )
+            )
             dim_stage *= 2
 
         # Bottleneck
         self.bottleneck = MSAB(
-            dim=dim_stage, dim_head=dim, heads=dim_stage // dim, num_blocks=num_blocks[-1])
+            dim=dim_stage,
+            dim_head=dim,
+            heads=dim_stage // dim,
+            num_blocks=num_blocks[-1],
+        )
 
         # Decoder
         self.decoder_layers = nn.ModuleList([])
         for i in range(stage):
-            self.decoder_layers.append(nn.ModuleList([
-                nn.ConvTranspose2d(dim_stage, dim_stage // 2, stride=2, kernel_size=2, padding=0, output_padding=0),
-                nn.Conv2d(dim_stage, dim_stage // 2, 1, 1, bias=False),
-                MSAB(
-                    dim=dim_stage // 2, num_blocks=num_blocks[stage - 1 - i], dim_head=dim,
-                    heads=(dim_stage // 2) // dim),
-            ]))
+            self.decoder_layers.append(
+                nn.ModuleList(
+                    [
+                        nn.ConvTranspose2d(
+                            dim_stage,
+                            dim_stage // 2,
+                            stride=2,
+                            kernel_size=2,
+                            padding=0,
+                            output_padding=0,
+                        ),
+                        nn.Conv2d(dim_stage, dim_stage // 2, 1, 1, bias=False),
+                        MSAB(
+                            dim=dim_stage // 2,
+                            num_blocks=num_blocks[stage - 1 - i],
+                            dim_head=dim,
+                            heads=(dim_stage // 2) // dim,
+                        ),
+                    ]
+                )
+            )
             dim_stage //= 2
 
         # Output projection
@@ -230,7 +278,7 @@ class MST(nn.Module):
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
+            trunc_normal_(m.weight, std=0.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):
@@ -248,7 +296,7 @@ class MST(nn.Module):
 
         # Encoder
         fea_encoder = []
-        for (MSAB, FeaDownSample) in self.encoder_layers:
+        for MSAB, FeaDownSample in self.encoder_layers:
             fea = MSAB(fea)
             fea_encoder.append(fea)
             fea = FeaDownSample(fea)
@@ -259,7 +307,7 @@ class MST(nn.Module):
         # Decoder
         for i, (FeaUpSample, Fution, LeWinBlcok) in enumerate(self.decoder_layers):
             fea = FeaUpSample(fea)
-            fea = Fution(torch.cat([fea, fea_encoder[self.stage-1-i]], dim=1))
+            fea = Fution(torch.cat([fea, fea_encoder[self.stage - 1 - i]], dim=1))
             fea = LeWinBlcok(fea)
 
         # Mapping
@@ -267,22 +315,39 @@ class MST(nn.Module):
 
         return out
 
+
 class MST_Plus_Plus(nn.Module):
-    def __init__(self, in_channels=3, out_channels=31, n_feat=31, stage=3, upscale_factor=1):
+    def __init__(
+        self, in_channels=3, out_channels=31, n_feat=31, stage=3, upscale_factor=1
+    ):
         super(MST_Plus_Plus, self).__init__()
         self.stage = stage
         self.upscale_factor = upscale_factor
-        self.conv_in = nn.Conv2d(in_channels, n_feat, kernel_size=3, padding=(3 - 1) // 2,bias=False)
-        modules_body = [MST(dim=31, stage=2, num_blocks=[1,1,1]) for _ in range(stage)]
+        self.conv_in = nn.Conv2d(
+            in_channels, n_feat, kernel_size=3, padding=(3 - 1) // 2, bias=False
+        )
+        modules_body = [
+            MST(dim=31, stage=2, num_blocks=[1, 1, 1]) for _ in range(stage)
+        ]
         self.body = nn.Sequential(*modules_body)
-        self.conv_out = nn.Conv2d(n_feat, out_channels, kernel_size=3, padding=(3 - 1) // 2,bias=False)
+        self.conv_out = nn.Conv2d(
+            n_feat, out_channels, kernel_size=3, padding=(3 - 1) // 2, bias=False
+        )
 
         # Add upsampling layers if upscale_factor > 1
         if upscale_factor > 1:
             self.upsample = nn.Sequential(
-                nn.Conv2d(out_channels, out_channels * (upscale_factor ** 2), kernel_size=3, padding=1, bias=False),
+                nn.Conv2d(
+                    out_channels,
+                    out_channels * (upscale_factor**2),
+                    kernel_size=3,
+                    padding=1,
+                    bias=False,
+                ),
                 nn.PixelShuffle(upscale_factor),
-                nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+                nn.Conv2d(
+                    out_channels, out_channels, kernel_size=3, padding=1, bias=False
+                ),
             )
         else:
             self.upsample = None
@@ -300,19 +365,6 @@ class MST_Plus_Plus(nn.Module):
         if self.upsample is not None:
             h = self.upsample(h)
 
-        h = torch.tanh(h)
+        # Use Sigmoid to ensure output is in [0, 1] (reflectance)
+        h = torch.sigmoid(h)
         return h
-
-
-
-
-
-
-
-
-
-
-
-
-
-

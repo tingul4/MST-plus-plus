@@ -133,6 +133,11 @@ parser.add_argument(
     default=2,
     help="Multiplier for restart cycle length (T_mult in CosineAnnealingWarmRestarts)",
 )
+parser.add_argument(
+    "--isTest",
+    action="store_true",
+    help="test mode with limited data for quick debugging",
+)
 opt = parser.parse_args()
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = opt.gpu_id
@@ -146,14 +151,14 @@ train_data = TrainDataset(
     arg=True,
     stride=opt.stride,
     upscale_factor=opt.upscale_factor,
-    isTest=False,
+    isTest=opt.isTest,
 )
 print(f"Iteration per epoch: {len(train_data)}")
 val_data = ValidDataset(
     data_root=opt.data_root,
     bgr2rgb=True,
     upscale_factor=opt.upscale_factor,
-    isTest=False,
+    isTest=opt.isTest,
 )
 print("Validation set samples: ", len(val_data))
 
@@ -212,6 +217,7 @@ logger = initialize_logger(log_dir)
 
 
 def main():
+    # torch.autograd.set_detect_anomaly(True)
     cudnn.benchmark = False
     best_psnr = 0
     writer = SummaryWriter(log_dir=os.path.join(opt.outf, "tensorboard"))
@@ -343,6 +349,10 @@ def main():
             desc=f"Epoch {epoch + 1}/{opt.end_epoch}",
         )
         for step, (images, labels) in pbar:
+            if torch.isnan(images).any() or torch.isinf(images).any():
+                logger.warning(f"NaN/Inf in input images at step {step}")
+            if torch.isnan(labels).any() or torch.isinf(labels).any():
+                logger.warning(f"NaN/Inf in input labels at step {step}")
             labels = labels.cuda()
             images = images.cuda()
             images = Variable(images)
@@ -361,6 +371,9 @@ def main():
                 torch.tensor(0),
                 torch.tensor(0),
             )
+
+            # Diagnostic for step 0: Check which loss causes NaN gradients
+            # (Diagnostic block removed)
 
             # Check for NaN in model output first
             if torch.isnan(output).any() or torch.isinf(output).any():
@@ -448,6 +461,26 @@ def main():
                 continue
 
             loss.backward()
+
+            # Check for NaN gradients
+            grad_nan = False
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                        logger.warning(
+                            f"NaN/Inf gradient detected in {name} at epoch {epoch + 1}, step {step}"
+                        )
+                        grad_nan = True
+                        break
+
+            if grad_nan:
+                logger.warning(
+                    f"Skipping step at epoch {epoch + 1}, step {step} due to NaN/Inf gradients."
+                )
+                optimizer.zero_grad()
+                scheduler.step()
+                continue
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
             optimizer.step()
             scheduler.step()

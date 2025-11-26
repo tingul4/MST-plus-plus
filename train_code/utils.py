@@ -129,10 +129,10 @@ class Loss_PSNR(nn.Module):
         C = im_true.size()[1]
         H = im_true.size()[2]
         W = im_true.size()[3]
-        Itrue = im_true.clamp(0.0, 1.0).mul_(data_range).resize_(N, C * H * W)
-        Ifake = im_fake.clamp(0.0, 1.0).mul_(data_range).resize_(N, C * H * W)
-        mse = nn.MSELoss(reduce=False)
-        err = mse(Itrue, Ifake).sum(dim=1, keepdim=True).div_(C * H * W)
+        Itrue = im_true.clamp(0.0, 1.0).mul(data_range).reshape(N, C * H * W)
+        Ifake = im_fake.clamp(0.0, 1.0).mul(data_range).reshape(N, C * H * W)
+        mse = nn.MSELoss(reduction="none")
+        err = mse(Itrue, Ifake).sum(dim=1, keepdim=True).div(C * H * W)
         psnr = 10.0 * torch.log((data_range**2) / err) / np.log(10.0)
         return torch.mean(psnr)
 
@@ -174,8 +174,8 @@ class Loss_SAM(nn.Module):
         target_normalized = target / (target_norm + self.eps)
 
         cos_similarity = torch.sum(pred_normalized * target_normalized, dim=1)
-        # Clamp to avoid nan from arccos
-        cos_similarity = torch.clamp(cos_similarity, -1.0, 1.0)
+        # Clamp to avoid nan from arccos and infinite gradients at +/- 1
+        cos_similarity = torch.clamp(cos_similarity, -1.0 + self.eps, 1.0 - self.eps)
 
         sam_angle = torch.acos(cos_similarity)
         return torch.mean(sam_angle)
